@@ -40,7 +40,7 @@ func TestNewGoGroup(t *testing.T) {
 	// 	}
 	// })
 
-	if err := c.ShutdownWait(); err != nil {
+	if err := <-c.ReadShutdown; err != nil {
 		fmt.Println("the program is about to exit -->", err.Error())
 	}
 

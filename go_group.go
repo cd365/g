@@ -10,13 +10,20 @@ import (
 type GoGroup struct {
 	Go func(fc func())
 
+	// custom handling debug.Stack()
 	Stack func(stack []byte)
 
+	// make sure to write a shutdown signal to `shutdownWait` only once
 	shutdownOnce *sync.Once
 
-	shutdownWait chan error
+	// read the shutdown error
+	ReadShutdown chan error
 
+	// exit the current process
 	Shutdown func(err error)
+
+	// carry the error message and exit the current process(exit only err != nil)
+	ShutdownError func(err error)
 
 	mutex *sync.Mutex
 
@@ -66,16 +73,12 @@ func (s *GoGroup) Wait() {
 	s.wg.Wait()
 }
 
-func (s *GoGroup) ShutdownWait() error {
-	return <-s.shutdownWait
-}
-
 func NewGoGroup() *GoGroup {
 	s := &GoGroup{
 		wg:           &sync.WaitGroup{},
 		mutex:        &sync.Mutex{},
 		shutdownOnce: &sync.Once{},
-		shutdownWait: make(chan error, 1),
+		ReadShutdown: make(chan error, 1),
 	}
 
 	s.Go = func(fc func()) {
@@ -103,9 +106,14 @@ func NewGoGroup() *GoGroup {
 
 	s.Shutdown = func(err error) {
 		s.shutdownOnce.Do(func() {
-			s.shutdownWait <- err
-			close(s.shutdownWait)
+			s.ReadShutdown <- err
+			close(s.ReadShutdown)
 		})
+	}
+	s.ShutdownError = func(err error) {
+		if err != nil {
+			s.Shutdown(err)
+		}
 	}
 
 	return s
