@@ -10,27 +10,27 @@ import (
 type GoGroup struct {
 	Go func(fc func())
 
-	// custom handling debug.Stack()
+	// Stack Custom handling panicked debug.Stack(), nil value will not call the receiver.
 	Stack func(stack []byte)
 
-	// make sure to write a shutdown signal to `shutdownWait` only once
+	// shutdownOnce Make sure to write a shutdown signal to `shutdownWait` only once.
 	shutdownOnce *sync.Once
 
-	// read the shutdown error
+	// ReadShutdown Read the shutdown error.
 	ReadShutdown chan error
 
-	// exit the current process
+	// Shutdown Unconditionally exit the current coroutine group.
 	Shutdown func(err error)
 
-	// carry the error message and exit the current process(exit only err != nil)
+	// ShutdownError Exit the current coroutine group when an error occurs.
 	ShutdownError func(err error)
 
 	mutex *sync.Mutex
 
-	// last in first out, when the function list is called, all coroutines are exited.
+	// exit Last in first out, when the function list is called, all coroutines are exited.
 	exit []func()
 
-	// last in first out, when the function list is called, not all coroutines have exited.
+	// quit Last in first out, when the function list is called, not all coroutines have exited.
 	quit []func()
 
 	wg *sync.WaitGroup
@@ -88,18 +88,17 @@ func NewGoGroup() *GoGroup {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			defer func() {
-				if msg := recover(); msg != nil {
-					buf := bytes.NewBuffer(nil)
-					buf.WriteString(fmt.Sprintf("<<< %v >>>\n", msg))
-					buf.Write(debug.Stack())
-					if s.Stack != nil {
-						s.Stack(buf.Bytes())
-					} else {
-						fmt.Println(buf.String())
+			stack := s.Stack
+			if stack != nil {
+				defer func() {
+					if msg := recover(); msg != nil {
+						buf := bytes.NewBuffer(nil)
+						buf.WriteString(fmt.Sprintf("<<< %v >>>\n", msg))
+						buf.Write(debug.Stack())
+						stack(buf.Bytes())
 					}
-				}
-			}()
+				}()
+			}
 			fc()
 		}()
 	}
