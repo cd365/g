@@ -11,9 +11,9 @@ func TestNewGoGroup(t *testing.T) {
 	// ...
 
 	c := NewGoGroup()
-	defer c.Exit()
+	defer c.CallExit()
 	defer c.Wait()
-	defer c.Quit()
+	defer c.CallQuit()
 	// ctx, cancel := context.WithCancel(context.Background())
 	// defer cancel()
 
@@ -21,7 +21,7 @@ func TestNewGoGroup(t *testing.T) {
 
 	c.Go(func() {
 		<-time.After(time.Second * 5)
-		c.Shutdown(errors.New("subjective withdrawal from the current program"))
+		c.Exit(errors.New("subjective withdrawal from the current program"))
 	})
 	c.Go(func() {
 		<-time.After(time.Second)
@@ -36,11 +36,11 @@ func TestNewGoGroup(t *testing.T) {
 	// 	select {
 	// 	case <-ctx.Done():
 	// 	case sig := <-notify:
-	// 		c.Shutdown(errors.New(sig.String()))
+	// 		c.Exit(errors.New(sig.String()))
 	// 	}
 	// })
 
-	if err := <-c.ReadShutdown; err != nil {
+	if err := <-c.ExitErr(); err != nil {
 		fmt.Println("the program is about to exit -->", err.Error())
 	}
 
