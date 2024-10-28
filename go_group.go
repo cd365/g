@@ -29,18 +29,9 @@ type GoGroup struct {
 	// listQuit Last in first out, when the function list is called, not all coroutines have exited.
 	listQuit []func()
 
-	mutex *sync.Mutex
+	mutex *Mutex
 
 	wg *sync.WaitGroup
-}
-
-func (s *GoGroup) withLock(fc func()) {
-	if fc == nil {
-		return
-	}
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	fc()
 }
 
 func (s *GoGroup) Stack(stack func(stack []byte)) {
@@ -49,7 +40,7 @@ func (s *GoGroup) Stack(stack func(stack []byte)) {
 
 func (s *GoGroup) PushExit(fc func()) {
 	if fc != nil {
-		s.withLock(func() { s.listExit = append(s.listExit, fc) })
+		s.mutex.WithLock(func() { s.listExit = append(s.listExit, fc) })
 	}
 }
 
@@ -61,7 +52,7 @@ func (s *GoGroup) CallExit() {
 
 func (s *GoGroup) PushQuit(fc func()) {
 	if fc != nil {
-		s.withLock(func() { s.listQuit = append(s.listQuit, fc) })
+		s.mutex.WithLock(func() { s.listQuit = append(s.listQuit, fc) })
 	}
 }
 
@@ -91,7 +82,7 @@ func NewGoGroup() *GoGroup {
 	s := &GoGroup{
 		exitErr:  make(chan error, 1),
 		exitOnce: &sync.Once{},
-		mutex:    &sync.Mutex{},
+		mutex:    NewMutex(),
 		wg:       &sync.WaitGroup{},
 	}
 
