@@ -12,9 +12,10 @@ const (
 )
 
 type Memory[V interface{}] struct {
-	count  int
-	memory []map[string]V
-	mutex  []*sync.RWMutex
+	count   int
+	memory  []map[string]V
+	mutex   *RWMutex
+	mutexes []*RWMutex
 }
 
 func NewMemory[V interface{}](count int) *Memory[V] {
@@ -23,12 +24,13 @@ func NewMemory[V interface{}](count int) *Memory[V] {
 	}
 	s := &Memory[V]{
 		count: count,
+		mutex: NewRWMutex(),
 	}
 	s.memory = make([]map[string]V, s.count)
-	s.mutex = make([]*sync.RWMutex, s.count)
+	s.mutexes = make([]*RWMutex, s.count)
 	for i := 0; i < s.count; i++ {
-		s.mutex[i] = &sync.RWMutex{}
 		s.memory[i] = make(map[string]V, memoryMapCapacity)
+		s.mutexes[i] = NewRWMutex()
 	}
 	return s
 }
@@ -48,29 +50,56 @@ func (s *Memory[V]) Index(key string, count int) int {
 	return int(num % int64(count))
 }
 
+func (s *Memory[V]) withLocker(locker sync.Locker, fc func()) {
+	if locker == nil || fc == nil {
+		return
+	}
+	locker.Lock()
+	defer locker.Unlock()
+	fc()
+}
+
+func (s *Memory[V]) readMemory(index int) (node map[string]V) {
+	s.withLocker(s.mutex.RLocker(), func() { node = s.memory[index] })
+	return
+}
+
+func (s *Memory[V]) writeMemory(index int, node map[string]V) {
+	s.withLocker(s.mutex.Locker(), func() { s.memory[index] = node })
+}
+
+func (s *Memory[V]) readMemoryNode(index int, fc func()) {
+	s.withLocker(s.mutexes[index].RLocker(), fc)
+}
+
+func (s *Memory[V]) writeMemoryNode(index int, fc func()) {
+	s.withLocker(s.mutexes[index].Locker(), fc)
+}
+
 func (s *Memory[V]) Get(key string) (value V, exists bool) {
 	index := s.Index(key, s.count)
-	locker := s.mutex[index]
-	locker.RLock()
-	defer locker.RUnlock()
-	value, exists = s.memory[index][key]
+	tmp := s.readMemory(index)
+	s.readMemoryNode(index, func() { value, exists = tmp[key] })
+	return
+}
+
+func (s *Memory[V]) Exists(key string) (exists bool) {
+	index := s.Index(key, s.count)
+	tmp := s.readMemory(index)
+	s.readMemoryNode(index, func() { _, exists = tmp[key] })
 	return
 }
 
 func (s *Memory[V]) Set(key string, value V) {
 	index := s.Index(key, s.count)
-	locker := s.mutex[index]
-	locker.Lock()
-	defer locker.Unlock()
-	s.memory[index][key] = value
+	tmp := s.readMemory(index)
+	s.writeMemoryNode(index, func() { tmp[key] = value })
 }
 
 func (s *Memory[V]) Del(key string) {
 	index := s.Index(key, s.count)
-	locker := s.mutex[index]
-	locker.Lock()
-	defer locker.Unlock()
-	delete(s.memory[index], key)
+	tmp := s.readMemory(index)
+	s.writeMemoryNode(index, func() { delete(tmp, key) })
 }
 
 type node struct {
@@ -87,16 +116,17 @@ func (s *Memory[V]) All() []map[string]V {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			s.mutex[index].RLock()
-			defer s.mutex[index].RUnlock()
-			tmp := make(map[string]V, len(s.memory[index]))
-			for k, v := range s.memory[index] {
-				tmp[k] = v
-			}
-			lists <- &node{
-				index: index,
-				value: tmp,
-			}
+			tmp := s.readMemory(index)
+			s.readMemoryNode(index, func() {
+				tmpMap := make(map[string]V, len(tmp))
+				for k, v := range tmp {
+					tmpMap[k] = v
+				}
+				lists <- &node{
+					index: index,
+					value: tmpMap,
+				}
+			})
 		}(i)
 	}
 	wg.Add(1)
@@ -117,9 +147,7 @@ func (s *Memory[V]) Clean() {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			s.mutex[index].Lock()
-			defer s.mutex[index].Unlock()
-			s.memory[index] = make(map[string]V, memoryMapCapacity)
+			s.writeMemory(index, make(map[string]V, memoryMapCapacity))
 		}(i)
 	}
 	wg.Wait()
@@ -131,11 +159,12 @@ func (s *Memory[V]) Range(fc func(index int, key string, value V)) {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			s.mutex[index].RLock()
-			defer s.mutex[index].RUnlock()
-			for k, v := range s.memory[index] {
-				fc(index, k, v)
-			}
+			tmp := s.readMemory(index)
+			s.readMemoryNode(index, func() {
+				for k, v := range tmp {
+					fc(index, k, v)
+				}
+			})
 		}(i)
 	}
 	wg.Wait()
@@ -147,13 +176,14 @@ func (s *Memory[V]) Repair() {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
+			tmp := s.readMemory(index)
 			memory := make(map[string]V, memoryMapCapacity)
-			s.mutex[index].Lock()
-			defer s.mutex[index].Unlock()
-			for k, v := range s.memory[index] {
-				memory[k] = v
-			}
-			s.memory[index] = memory
+			s.writeMemoryNode(index, func() {
+				for k, v := range tmp {
+					memory[k] = v
+				}
+			})
+			s.writeMemory(index, memory)
 		}(i)
 	}
 	wg.Wait()
