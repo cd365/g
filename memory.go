@@ -87,9 +87,9 @@ func (s *Memory[V]) All() []map[string]V {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			tmp := make(map[string]V, len(s.memory[index]))
 			s.mutex[index].RLock()
 			defer s.mutex[index].RUnlock()
+			tmp := make(map[string]V, len(s.memory[index]))
 			for k, v := range s.memory[index] {
 				tmp[k] = v
 			}
@@ -125,7 +125,7 @@ func (s *Memory[V]) Clean() {
 	wg.Wait()
 }
 
-func (s *Memory[V]) Range(fc func(key string, value V)) {
+func (s *Memory[V]) Range(fc func(index int, key string, value V)) {
 	wg := &sync.WaitGroup{}
 	for i := 0; i < s.count; i++ {
 		wg.Add(1)
@@ -134,7 +134,7 @@ func (s *Memory[V]) Range(fc func(key string, value V)) {
 			s.mutex[index].RLock()
 			defer s.mutex[index].RUnlock()
 			for k, v := range s.memory[index] {
-				fc(k, v)
+				fc(index, k, v)
 			}
 		}(i)
 	}
@@ -143,31 +143,18 @@ func (s *Memory[V]) Range(fc func(key string, value V)) {
 
 func (s *Memory[V]) Repair() {
 	wg := &sync.WaitGroup{}
-	lists := make(chan *node, s.count)
-	defer close(lists)
 	for i := 0; i < s.count; i++ {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
+			memory := make(map[string]V, memoryMapCapacity)
 			s.mutex[index].Lock()
 			defer s.mutex[index].Unlock()
-			memory := make(map[string]V, memoryMapCapacity)
 			for k, v := range s.memory[index] {
 				memory[k] = v
 			}
-			lists <- &node{
-				index: index,
-				value: memory,
-			}
+			s.memory[index] = memory
 		}(i)
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < s.count; i++ {
-			tmp := <-lists
-			s.memory[tmp.index] = tmp.value.(map[string]V)
-		}
-	}()
 	wg.Wait()
 }
