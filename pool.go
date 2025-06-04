@@ -37,9 +37,6 @@ type GoPool struct {
 	// poolCancel Coroutine pool cancelFunc.
 	poolCancel context.CancelFunc
 
-	// shutdown Make sure the stop logic is only executed once.
-	shutdown *sync.Once
-
 	// wg sync.WaitGroup.
 	wg *sync.WaitGroup
 
@@ -75,10 +72,9 @@ func NewGoPool(ctx context.Context, bufferTasks uint32) *GoPool {
 func (s *GoPool) init() *GoPool {
 	poolCtx, poolCancel := context.WithCancel(s.ctx)
 	s.poolCtx, s.poolCancel = poolCtx, poolCancel
-	s.shutdown = &sync.Once{}
 	s.wg = &sync.WaitGroup{}
 	s.tasks = make(chan func(), s.bufferTasks)
-	s.status = GoPoolStatusNotStarted
+	atomic.StoreInt32(&s.status, GoPoolStatusNotStarted)
 	return s
 }
 
@@ -99,33 +95,27 @@ func (s *GoPool) SetPoolCapacity(poolCapacity uint32) *GoPool {
 // Start Begin running the coroutine pool.
 func (s *GoPool) Start() *GoPool {
 	if atomic.LoadInt32(&s.status) == GoPoolStatusStopped {
-		atomic.StoreInt32(&s.status, GoPoolStatusNotStarted)
 		s.init()
 	}
-	if !atomic.CompareAndSwapInt32(&s.status, GoPoolStatusNotStarted, GoPoolStatusRunning) {
-		return s
-	}
-	for i := uint32(0); i < s.poolCapacity; i++ {
-		s.wg.Add(1)
-		go s.work()
+	if atomic.CompareAndSwapInt32(&s.status, GoPoolStatusNotStarted, GoPoolStatusRunning) {
+		for i := uint32(0); i < s.poolCapacity; i++ {
+			s.wg.Add(1)
+			go s.work(s.poolCtx)
+		}
 	}
 	return s
 }
 
-func (s *GoPool) work() {
+func (s *GoPool) work(ctx context.Context) {
 	defer s.wg.Done()
 	defer atomic.AddInt32(&s.running, -1)
-
 	atomic.AddInt32(&s.running, 1)
-	for {
+	for atomic.LoadInt32(&s.status) == GoPoolStatusRunning {
 		select {
-		case <-s.poolCtx.Done():
+		case <-ctx.Done():
 			return
 		case task, ok := <-s.tasks:
-			if !ok {
-				return
-			}
-			if task != nil {
+			if ok && task != nil {
 				task()
 			}
 		}
@@ -138,16 +128,16 @@ func (s *GoPool) Submit(task func()) bool {
 	if task == nil {
 		return false
 	}
-	if status := atomic.LoadInt32(&s.status); status == GoPoolStatusStopping || status == GoPoolStatusStopped {
+	if atomic.LoadInt32(&s.status) != GoPoolStatusRunning {
 		return false
 	}
 	ok := false
 	s.mutexTasks.WithLock(func() {
-		if s.tasks != nil {
+		if atomic.LoadInt32(&s.status) == GoPoolStatusRunning {
 			select {
+			case <-s.poolCtx.Done():
 			case s.tasks <- task:
 				ok = true
-			case <-s.poolCtx.Done():
 			}
 		}
 	})
@@ -167,39 +157,28 @@ func (s *GoPool) Clean(clean func(work func())) *GoPool {
 	return s
 }
 
-// cleanTasks processes remaining tasks in the queue using the custom clean function, if set.
-func (s *GoPool) cleanTasks(ctx context.Context) {
+// cleanTasks Processes remaining tasks in the queue using the custom clean function, if set.
+func (s *GoPool) cleanTasks() {
 	if clean := s.clean; clean != nil {
 		for {
-			select {
-			case <-ctx.Done():
+			task, ok := <-s.tasks
+			if !ok {
 				return
-			case task, ok := <-s.tasks:
-				if !ok {
-					return
-				}
-				if task != nil {
-					clean(task)
-				}
+			}
+			if task != nil {
+				clean(task)
 			}
 		}
 	}
 }
 
-// Stop Stop the coroutine pool.
-func (s *GoPool) Stop(ctx context.Context) *GoPool {
-	s.shutdown.Do(func() {
-		if atomic.CompareAndSwapInt32(&s.status, GoPoolStatusRunning, GoPoolStatusStopping) {
-			s.poolCancel()
-
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			s.mutexTasks.WithLock(func() { close(s.tasks); s.cleanTasks(ctx); s.tasks = nil })
-
-			atomic.StoreInt32(&s.status, GoPoolStatusStopped)
-		}
-	})
+// Stop The coroutine pool stops running immediately.
+func (s *GoPool) Stop() *GoPool {
+	if atomic.CompareAndSwapInt32(&s.status, GoPoolStatusRunning, GoPoolStatusStopping) {
+		s.poolCancel()
+		s.mutexTasks.WithLock(func() { close(s.tasks); s.cleanTasks() })
+		atomic.StoreInt32(&s.status, GoPoolStatusStopped)
+	}
 	return s
 }
 
