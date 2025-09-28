@@ -17,10 +17,10 @@ const (
 // GoPoolTasker Package custom task and support storage of custom data.
 type GoPoolTasker interface {
 	// Load Loading stored custom data.
-	Load() interface{}
+	Load() any
 
 	// Store Storing custom data.
-	Store(i interface{}) GoPoolTasker
+	Store(i any) GoPoolTasker
 
 	// Execute Calling custom task function.
 	Execute(t GoPoolTasker) GoPoolTasker
@@ -29,14 +29,14 @@ type GoPoolTasker interface {
 type goPoolTasker struct {
 	callStatus int32
 	execute    func(t GoPoolTasker)
-	storage    interface{}
+	storage    any
 }
 
-func (s *goPoolTasker) Load() interface{} {
+func (s *goPoolTasker) Load() any {
 	return s.storage
 }
 
-func (s *goPoolTasker) Store(i interface{}) GoPoolTasker {
+func (s *goPoolTasker) Store(i any) GoPoolTasker {
 	s.storage = i
 	return s
 }

@@ -11,14 +11,14 @@ const (
 	memoryMapCapacity = 32
 )
 
-type Memory[V interface{}] struct {
+type Memory[V any] struct {
 	count   int
 	memory  []map[string]V
 	mutex   *RWMutex
 	mutexes []*RWMutex
 }
 
-func NewMemory[V interface{}](count int) *Memory[V] {
+func NewMemory[V any](count int) *Memory[V] {
 	if count < 1 || count > 1000 {
 		count = 10
 	}
@@ -61,7 +61,7 @@ func (s *Memory[V]) withLocker(locker sync.Locker, fc func()) {
 
 func (s *Memory[V]) readMemory(index int) (node map[string]V) {
 	s.withLocker(s.mutex.RLocker(), func() { node = s.memory[index] })
-	return
+	return node
 }
 
 func (s *Memory[V]) writeMemory(index int, node map[string]V) {
@@ -80,14 +80,14 @@ func (s *Memory[V]) Get(key string) (value V, exists bool) {
 	index := s.Index(key, s.count)
 	tmp := s.readMemory(index)
 	s.readMemoryNode(index, func() { value, exists = tmp[key] })
-	return
+	return value, exists
 }
 
 func (s *Memory[V]) Exists(key string) (exists bool) {
 	index := s.Index(key, s.count)
 	tmp := s.readMemory(index)
 	s.readMemoryNode(index, func() { _, exists = tmp[key] })
-	return
+	return exists
 }
 
 func (s *Memory[V]) Set(key string, value V) {
@@ -104,7 +104,7 @@ func (s *Memory[V]) Del(key string) {
 
 type node struct {
 	index int
-	value interface{}
+	value any
 }
 
 func (s *Memory[V]) All() []map[string]V {
