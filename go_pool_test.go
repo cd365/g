@@ -22,7 +22,7 @@ func test1() {
 	// When the coroutine pool exits, customize the to-do task list, If not set, all pending tasks will be discarded.
 	p.Clean(func(t GoPoolTasker) {
 		// Currently in the cleanup task, maybe there is no need to execute the original task logic.
-		t.Execute(t) // It may need to be commented out.
+		t.Execute() // It may need to be commented out.
 
 		// Implement your own custom cleanup logic. TODO...
 		fmt.Printf("test1 call by clean: %p %v\n", t, t.Load())
@@ -38,7 +38,7 @@ func test1() {
 			go func(a int) {
 				defer wg.Done()
 				for j := 0; j < 1000; j++ {
-					newTask := NewGoPoolTasker(func(t GoPoolTasker) {
+					newTask := NewGoPoolTasker(func(i any) {
 						defer atomic.AddInt32(&all, 1)
 						// TODO your logic
 					})
@@ -59,7 +59,7 @@ func test1() {
 			go func(a int) {
 				defer wg.Done()
 				for j := 0; j < 1000; j++ {
-					newTask := NewGoPoolTasker(func(t GoPoolTasker) {
+					newTask := NewGoPoolTasker(func(i any) {
 						defer atomic.AddInt32(&all, 1)
 						// TODO your logic
 					})
@@ -84,7 +84,7 @@ func test2() {
 	p := NewGoPool(1 << 16)
 	p.Clean(func(t GoPoolTasker) {
 		// Currently in the cleanup task, maybe there is no need to execute the original task logic.
-		t.Execute(t) // It may need to be commented out.
+		t.Execute() // It may need to be commented out.
 
 		// Implement your own custom cleanup logic. TODO...
 		fmt.Printf("test2 call by clean: %p %v\n", t, t.Load())
@@ -93,15 +93,13 @@ func test2() {
 
 	go func() {
 		for i := int32(0); i < count; i++ {
-			newTask := NewGoPoolTasker(func(t GoPoolTasker) {
+			newTask := NewGoPoolTasker(func(i any) {
 				defer atomic.AddInt32(&done, 1)
 
 				// custom logic
-				if v := t.Load(); v != nil {
-					if iv, ok := v.(int32); ok {
-						if iv&1 == 1 {
-							return
-						}
+				if iv, ok := i.(int32); ok {
+					if iv&1 == 1 {
+						return
 					}
 				}
 
@@ -154,7 +152,7 @@ func test3() {
 		go func() {
 			total := count / 10
 			for i := 0; i < total; i++ {
-				if p.Submit(NewGoPoolTasker(func(t GoPoolTasker) {
+				if p.Submit(NewGoPoolTasker(func(i any) {
 					atomic.AddInt32(&called, 1)
 				})) {
 					atomic.AddInt32(&added, 1)

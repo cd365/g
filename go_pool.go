@@ -20,36 +20,36 @@ type GoPoolTasker interface {
 	Load() any
 
 	// Store Storing custom data.
-	Store(i any) GoPoolTasker
+	Store(i any)
 
 	// Execute Calling custom task function.
-	Execute(t GoPoolTasker) GoPoolTasker
+	Execute()
 }
 
-type goPoolTasker struct {
-	storage    any
-	execute    func(t GoPoolTasker)
-	callStatus int32
+type goPoolTask struct {
+	storage any
+	execute func(i any)
+	called  int32
 }
 
-func (s *goPoolTasker) Load() any {
+func (s *goPoolTask) Load() any {
 	return s.storage
 }
 
-func (s *goPoolTasker) Store(i any) GoPoolTasker {
-	s.storage = i
-	return s
-}
-
-func (s *goPoolTasker) Execute(t GoPoolTasker) GoPoolTasker {
-	if atomic.CompareAndSwapInt32(&s.callStatus, 0, 1) && s.execute != nil {
-		s.execute(t)
+func (s *goPoolTask) Store(i any) {
+	if atomic.LoadInt32(&s.called) == 0 {
+		s.storage = i
 	}
-	return s
 }
 
-func NewGoPoolTasker(fc func(t GoPoolTasker)) GoPoolTasker {
-	return &goPoolTasker{
+func (s *goPoolTask) Execute() {
+	if s.execute != nil && atomic.CompareAndSwapInt32(&s.called, 0, 1) {
+		s.execute(s.storage)
+	}
+}
+
+func NewGoPoolTasker(fc func(i any)) GoPoolTasker {
+	return &goPoolTask{
 		execute: fc,
 	}
 }
@@ -155,7 +155,7 @@ func (s *GoPool) work() {
 			return
 		case tmp, ok := <-s.tasks:
 			if ok && tmp != nil {
-				tmp.Execute(tmp)
+				tmp.Execute()
 			}
 		}
 	}
