@@ -23,15 +23,15 @@ type GoGroup struct {
 	// doneOnce Make sure to write a shutdown signal to `shutdownWait` only once.
 	exitOnce *sync.Once
 
+	mutex *Mutex
+
+	wg *sync.WaitGroup
+
 	// listExit Last in first out, when the function list is called, all coroutines are exited.
 	listExit []func()
 
 	// listQuit Last in first out, when the function list is called, not all coroutines have exited.
 	listQuit []func()
-
-	mutex *Mutex
-
-	wg *sync.WaitGroup
 }
 
 func (s *GoGroup) Stack(stack func(stack []byte)) {

@@ -27,9 +27,9 @@ type GoPoolTasker interface {
 }
 
 type goPoolTasker struct {
-	callStatus int32
-	execute    func(t GoPoolTasker)
 	storage    any
+	execute    func(t GoPoolTasker)
+	callStatus int32
 }
 
 func (s *goPoolTasker) Load() any {
@@ -56,18 +56,6 @@ func NewGoPoolTasker(fc func(t GoPoolTasker)) GoPoolTasker {
 
 // GoPool Implement a coroutine pool so that it can process tasks concurrently.
 type GoPool struct {
-	// goNumbers Number of coroutines.
-	goNumbers uint32
-
-	// taskQueueCapacity Task queue capacity.
-	taskQueueCapacity uint32
-
-	// status Coroutine pool status.
-	status int32
-
-	// running The number of coroutines running.
-	running int32
-
 	// ctx Coroutine pool context.
 	ctx context.Context
 
@@ -85,6 +73,17 @@ type GoPool struct {
 
 	// mutexTasks Mutex.
 	mutexTasks *Mutex
+	// goNumbers Number of coroutines.
+	goNumbers uint32
+
+	// taskQueueCapacity Task queue capacity.
+	taskQueueCapacity uint32
+
+	// status Coroutine pool status.
+	status int32
+
+	// running The number of coroutines running.
+	running int32
 }
 
 // NewGoPool Create a coroutine pool object.

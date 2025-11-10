@@ -12,10 +12,10 @@ const (
 )
 
 type Memory[V any] struct {
-	count   int
-	memory  []map[string]V
 	mutex   *RWMutex
+	memory  []map[string]V
 	mutexes []*RWMutex
+	count   int
 }
 
 func NewMemory[V any](count int) *Memory[V] {
@@ -103,8 +103,8 @@ func (s *Memory[V]) Del(key string) {
 }
 
 type node struct {
-	index int
 	value any
+	index int
 }
 
 func (s *Memory[V]) All() []map[string]V {
