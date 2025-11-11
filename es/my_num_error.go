@@ -4,7 +4,7 @@ import (
 	"errors"
 )
 
-// MyNumErr Custom error with error number.
+// MyNumErr Custom error, an error with a custom number.
 type MyNumErr interface {
 	error
 

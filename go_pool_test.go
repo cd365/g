@@ -20,12 +20,13 @@ func test1() {
 	p := NewGoPool(1 << 16)
 
 	// When the coroutine pool exits, customize the to-do task list, If not set, all pending tasks will be discarded.
-	p.Clean(func(t GoPoolTasker) {
+	p.Clean(func(t GoTask) {
 		// Currently in the cleanup task, maybe there is no need to execute the original task logic.
 		t.Execute() // It may need to be commented out.
 
 		// Implement your own custom cleanup logic. TODO...
-		fmt.Printf("test1 call by clean: %p %v\n", t, t.Load())
+		i, _ := t.Load()
+		fmt.Printf("test1 call by clean: %p %v\n", t, i)
 	})
 
 	all := int32(0)
@@ -38,11 +39,12 @@ func test1() {
 			go func(a int) {
 				defer wg.Done()
 				for j := 0; j < 1000; j++ {
-					newTask := NewGoPoolTasker(func(i any) {
+					tmp := NewGoTask()
+					tmp.Store(nil, func(i any) {
 						defer atomic.AddInt32(&all, 1)
 						// TODO your logic
 					})
-					p.Submit(newTask)
+					p.Submit(tmp)
 				}
 			}(i)
 		}
@@ -59,11 +61,12 @@ func test1() {
 			go func(a int) {
 				defer wg.Done()
 				for j := 0; j < 1000; j++ {
-					newTask := NewGoPoolTasker(func(i any) {
+					tmp := NewGoTask()
+					tmp.Store(nil, func(i any) {
 						defer atomic.AddInt32(&all, 1)
 						// TODO your logic
 					})
-					p.Submit(newTask)
+					p.Submit(tmp)
 				}
 			}(i)
 		}
@@ -82,18 +85,20 @@ func test2() {
 	stopCount := count / 10 * 7
 
 	p := NewGoPool(1 << 16)
-	p.Clean(func(t GoPoolTasker) {
+	p.Clean(func(t GoTask) {
 		// Currently in the cleanup task, maybe there is no need to execute the original task logic.
 		t.Execute() // It may need to be commented out.
 
 		// Implement your own custom cleanup logic. TODO...
-		fmt.Printf("test2 call by clean: %p %v\n", t, t.Load())
+		i, _ := t.Load()
+		fmt.Printf("test2 call by clean: %p %v\n", t, i)
 	})
 	p.Start()
 
 	go func() {
 		for i := int32(0); i < count; i++ {
-			newTask := NewGoPoolTasker(func(i any) {
+			tmp := NewGoTask()
+			tmp.Store(i, func(i any) {
 				defer atomic.AddInt32(&done, 1)
 
 				// custom logic
@@ -105,8 +110,7 @@ func test2() {
 
 				atomic.AddInt32(&success, 1)
 			})
-			newTask.Store(i)
-			if p.Submit(newTask) {
+			if p.Submit(tmp) {
 				atomic.AddInt32(&input, 1)
 			}
 		}
@@ -136,12 +140,13 @@ func test2() {
 
 func test3() {
 	p := NewGoPool(1 << 16)
-	p.Clean(func(t GoPoolTasker) {
+	p.Clean(func(t GoTask) {
 		// Currently in the cleanup task, maybe there is no need to execute the original task logic.
 		// t.Execute(t) // It may need to be commented out.
 
 		// Implement your own custom cleanup logic. TODO...
-		fmt.Printf("test3 call by clean: %p %v\n", t, t.Load())
+		i, _ := t.Load()
+		fmt.Printf("test3 call by clean: %p %v\n", t, i)
 	})
 	p.Start()
 
@@ -152,9 +157,11 @@ func test3() {
 		go func() {
 			total := count / 10
 			for i := 0; i < total; i++ {
-				if p.Submit(NewGoPoolTasker(func(i any) {
+				tmp := NewGoTask()
+				tmp.Store(i, func(i any) {
 					atomic.AddInt32(&called, 1)
-				})) {
+				})
+				if p.Submit(tmp) {
 					atomic.AddInt32(&added, 1)
 				}
 			}

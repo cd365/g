@@ -14,44 +14,42 @@ const (
 	GoPoolStatusStopped                 // Stopped
 )
 
-// GoPoolTasker Package custom task and support storage of custom data.
-type GoPoolTasker interface {
+// GoTask Package custom task and support storage of custom data.
+type GoTask interface {
 	// Load Loading stored custom data.
-	Load() any
+	Load() (any, func(i any))
 
 	// Store Storing custom data.
-	Store(i any)
+	Store(i any, execute func(i any))
 
 	// Execute Calling custom task function.
 	Execute()
 }
 
-type goPoolTask struct {
+type goTask struct {
 	storage any
 	execute func(i any)
-	called  int32
 }
 
-func (s *goPoolTask) Load() any {
-	return s.storage
+func (s *goTask) Load() (any, func(i any)) {
+	return s.storage, s.execute
 }
 
-func (s *goPoolTask) Store(i any) {
-	if atomic.LoadInt32(&s.called) == 0 {
-		s.storage = i
+func (s *goTask) Store(i any, execute func(i any)) {
+	if execute != nil {
+		s.storage, s.execute = i, execute
 	}
 }
 
-func (s *goPoolTask) Execute() {
-	if s.execute != nil && atomic.CompareAndSwapInt32(&s.called, 0, 1) {
-		s.execute(s.storage)
+func (s *goTask) Execute() {
+	storage, execute := s.Load()
+	if execute != nil {
+		execute(storage)
 	}
 }
 
-func NewGoPoolTasker(fc func(i any)) GoPoolTasker {
-	return &goPoolTask{
-		execute: fc,
-	}
+func NewGoTask() GoTask {
+	return &goTask{}
 }
 
 // GoPool Implement a coroutine pool so that it can process tasks concurrently.
@@ -66,13 +64,14 @@ type GoPool struct {
 	wg *sync.WaitGroup
 
 	// tasks Task Channel.
-	tasks chan GoPoolTasker
+	tasks chan GoTask
 
 	// clean Customize your to-do task list, If not set, all pending tasks will be discarded.
-	clean func(tasker GoPoolTasker)
+	clean func(task GoTask)
 
-	// mutexTasks Mutex.
-	mutexTasks *Mutex
+	// mutex Task Mutex.
+	mutex *Mutex
+
 	// goNumbers Number of coroutines.
 	goNumbers uint32
 
@@ -95,7 +94,7 @@ func NewGoPool(taskQueueCapacity uint32) *GoPool {
 	pool := &GoPool{
 		goNumbers:         goNumbers,
 		taskQueueCapacity: taskQueueCapacity,
-		mutexTasks:        NewMutex(),
+		mutex:             NewMutex(),
 	}
 	return pool.init()
 }
@@ -104,7 +103,7 @@ func NewGoPool(taskQueueCapacity uint32) *GoPool {
 func (s *GoPool) init() *GoPool {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.wg = &sync.WaitGroup{}
-	s.tasks = make(chan GoPoolTasker, s.taskQueueCapacity)
+	s.tasks = make(chan GoTask, s.taskQueueCapacity)
 	atomic.StoreInt32(&s.status, GoPoolStatusNotStarted)
 	return s
 }
@@ -124,8 +123,8 @@ func (s *GoPool) SetGoNumbers(goNumbers uint32) *GoPool {
 }
 
 // Clean Customize your to-do task list, If not set, all pending tasks will be discarded.
-func (s *GoPool) Clean(handle func(t GoPoolTasker)) *GoPool {
-	s.clean = handle
+func (s *GoPool) Clean(clean func(t GoTask)) *GoPool {
+	s.clean = clean
 	return s
 }
 
@@ -146,8 +145,10 @@ func (s *GoPool) Start() bool {
 
 // work Read the task and call the task custom function.
 func (s *GoPool) work() {
-	defer s.wg.Done()
-	defer atomic.AddInt32(&s.running, -1)
+	defer func() {
+		s.wg.Done()
+		atomic.AddInt32(&s.running, -1)
+	}()
 	atomic.AddInt32(&s.running, 1)
 	for atomic.LoadInt32(&s.status) == GoPoolStatusRunning {
 		select {
@@ -163,16 +164,16 @@ func (s *GoPool) work() {
 
 // Submit adds a task to the coroutine pool.
 // Returns true if the task is successfully queued, false if the task is nil or the pool is stopping/stopped.
-func (s *GoPool) Submit(tasker GoPoolTasker) bool {
-	if tasker == nil || atomic.LoadInt32(&s.status) != GoPoolStatusRunning {
+func (s *GoPool) Submit(task GoTask) bool {
+	if task == nil || atomic.LoadInt32(&s.status) != GoPoolStatusRunning {
 		return false
 	}
 	result := false
-	s.mutexTasks.WithLock(func() {
+	s.mutex.WithLock(func() {
 		if atomic.LoadInt32(&s.status) == GoPoolStatusRunning {
 			select {
 			case <-s.ctx.Done():
-			case s.tasks <- tasker:
+			case s.tasks <- task:
 				result = true
 			}
 		}
@@ -200,7 +201,7 @@ func (s *GoPool) Stop() bool {
 	if atomic.CompareAndSwapInt32(&s.status, GoPoolStatusRunning, GoPoolStatusStopping) {
 		defer s.wg.Wait()
 		s.cancel()
-		s.mutexTasks.WithLock(func() {
+		s.mutex.WithLock(func() {
 			close(s.tasks)
 			s.cleanTasks()
 		})
